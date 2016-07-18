@@ -3321,6 +3321,8 @@ public class BlockManager {
     return blocksMap.getStoredBlock(block);
   }
 
+  
+   
   /** updates a block in under replication queue */
   private void updateNeededReplications(final Block block,
       final int curReplicasDelta, int expectedReplicasDelta) {

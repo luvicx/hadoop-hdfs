@@ -172,8 +172,7 @@ public class BlockManager {
   /** Replication thread. */
   final Daemon replicationThread = new Daemon(new ReplicationMonitor());
   
-  //wcx added DynamicPolicyMonitor
-  final Daemon dynamicPolicyThread = new Daemon(new DynamicPolicyMonitor());
+  
   
   /** Store blocks -> datanodedescriptor(s) map of corrupt replicas */
   final CorruptReplicasMap corruptReplicas = new CorruptReplicasMap();
@@ -451,16 +450,14 @@ public class BlockManager {
     datanodeManager.activate(conf);
     this.replicationThread.start();
     //wcx added 0716 dynamicPolicyMonitor
-    this.dynamicPolicyThread.start();
+    
   }
 
   public void close() {
     try {
       replicationThread.interrupt();
       replicationThread.join(3000);
-      //wcx added 0716 dynamicPolicyThread
-      dynamicPolicyThread.interrupt();
-      dynamicPolicyThread.join(60000);//wcx one minite?
+     
     } catch (InterruptedException ie) {
     }
     datanodeManager.close();
@@ -851,7 +848,7 @@ public class BlockManager {
       for(DatanodeStorageInfo storage : blocksMap.getStorages(blk)) {
         final DatanodeDescriptor d = storage.getDatanodeDescriptor();
         final boolean replicaCorrupt = corruptReplicas.isReplicaCorrupt(blk, d);
-        if (isCorrupt || (!replicaCorrupt))
+        if (isCorrupt || (!replicaCorrupt))// why isCorrupt?
           machines[j++] = storage;
       }
     }
@@ -3524,43 +3521,8 @@ public class BlockManager {
     return neededReplications.size();
   }
   
-  //wcx added 0716 a DynanicPolicyMonitor
-  private class DynamicPolicyMonitor implements Runnable
-  {
-	  public void run(){
-		  while (namesystem.isRunning())
-		  {
-			  try{
-					//wcx added 0716 try to add an dynamic replication policy
-			        //first test for one minute
-			        //if (Time.monotonicNow()%60000==0)
-			        //{
-			        		
-			        //}
-				  
-				  
-			        Thread.sleep(60);
-			  }
-			catch(Throwable t)
-			{
-				if (!namesystem.isRunning()) {
-		            LOG.info("Stopping DynamicPolicyMonitor.");
-		            if (!(t instanceof InterruptedException)) {
-		              LOG.info("DynamicPolicyMonitor received an exception"
-		                  + " while shutting down.", t);
-		            }
-		            break;
-		          } else if (!checkNSRunning && t instanceof InterruptedException) {
-		            LOG.info("Stopping DynamicPolicyMonitor for testing.");
-		            break;
-		          }
-		          LOG.fatal("DynamicPolicyMonitor thread received Runtime exception. ", t);
-		          terminate(1, t);	  
-			}
-		  }
-		 
-	  }
-  }
+
+  
 
   /**
    * Periodically calls computeReplicationWork().

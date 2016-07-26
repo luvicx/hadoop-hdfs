@@ -91,6 +91,7 @@ import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_STORAGE_POLICY_ENABLED_DE
 import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_SUPPORT_APPEND_DEFAULT;
 import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_SUPPORT_APPEND_KEY;
 import static org.apache.hadoop.hdfs.server.common.HdfsServerConstants.SECURITY_XATTR_UNREADABLE_BY_SUPERUSER;
+import static org.apache.hadoop.util.ExitUtil.terminate;
 import static org.apache.hadoop.util.Time.now;
 
 import java.io.BufferedWriter;
@@ -446,6 +447,9 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   // A daemon to periodically clean up corrupt lazyPersist files
   // from the name space.
   Daemon lazyPersistFileScrubber = null;
+  
+//wcx added DynamicPolicyMonitor
+  Daemon dynamicPolicyThread = null;
   /**
    * When an active namenode will roll its own edit log, in # edits
    */
@@ -560,6 +564,44 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
 
   private final FSImage fsImage;
 
+//wcx added 0716 a DynanicPolicyMonitor
+  private class DynamicPolicyMonitor implements Runnable
+  {
+	  public void run(){
+		  while (isRunning())
+		  {
+			  try{
+					//wcx added 0716 try to add an dynamic replication policy
+			        //first test for one minute
+			        //if (Time.monotonicNow()%60000==0)
+			        //{
+			        		
+			        //}
+				  
+				    dynamicArrangeReplicaNum();
+				  
+			        Thread.sleep(60000);
+			  }
+			catch(Throwable t)
+			{
+				if (!isRunning()) {
+		            LOG.info("Stopping DynamicPolicyMonitor.");
+		            if (!(t instanceof InterruptedException)) {
+		              LOG.info("DynamicPolicyMonitor received an exception"
+		                  + " while shutting down.", t);
+		            }
+		            break;
+		          } else if ( t instanceof InterruptedException) {
+		            LOG.info("Stopping DynamicPolicyMonitor for testing.");
+		            break;
+		          }
+		          LOG.fatal("DynamicPolicyMonitor thread received Runtime exception. ", t);
+		          terminate(1, t);	  
+			}
+		  }
+		 
+	  }
+  }
   /**
    * Notify that loading of this FSDirectory is complete, and
    * it is imageLoaded for use
@@ -1205,6 +1247,10 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
             lazyPersistFileScrubIntervalSec));
         lazyPersistFileScrubber.start();
       }
+      
+      dynamicPolicyThread = new Daemon(new DynamicPolicyMonitor());
+      dynamicPolicyThread.start();
+      
 
       cacheManager.startMonitorThread();
       blockManager.getDatanodeManager().setShouldSendCachingCommands(true);
@@ -1263,6 +1309,14 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
         ((LazyPersistFileScrubber) lazyPersistFileScrubber.getRunnable()).stop();
         lazyPersistFileScrubber.interrupt();
       }
+      
+      //wcx added 
+      if (dynamicPolicyThread != null){
+    	  //((DynamicPolicyMonitor) dynamicPolicyThread.getRunnable()).stop();
+    	  dynamicPolicyThread.interrupt();
+      }
+    	  
+    	  
       if (dir != null && getFSImage() != null) {
         if (getFSImage().editLog != null) {
           getFSImage().editLog.close();
@@ -9370,5 +9424,79 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       logger.addAppender(asyncAppender);        
     }
   }
+  
+  //wcx added 0719 a DynamicPolicyFunction
+  private void dynamicArrangeReplicaNum()
+  {
+	  long totalfileNum = 0;
+	  long totalfileReadCount = 0;
+	  //iterate all the files in the namesystem
+	  
+	  writeLock();
+	  INodeMap inm = dir.getINodeMap();
+	  Iterator<INodeWithAdditionalFields> it = inm.getMapIterator();
+	  while (it.hasNext())
+	  {
+		  INodeWithAdditionalFields inode = it.next();
+		  if (inode.isFile())
+		  {
+			  totalfileNum++;
+			  totalfileReadCount += inode.asFile().getReadCount();
+		  }
+		  
+	  }
+	  
+	  if (totalfileNum == 0)
+		  return;
+	  
+	  double aveRead = (double)totalfileReadCount/totalfileNum;//need to change if total == 0
+	  
+	  it = inm.getMapIterator();
+	  while (it.hasNext())
+	  {
+		  INodeWithAdditionalFields inode = it.next();
+		  if (inode.isFile())
+		  {
+			  INodeFile inf = inode.asFile();
+			  long readCount = inf.getReadCount();
+			  
+			  if (readCount>aveRead)
+			  {
+				  short currentReplication = inf.getFileReplication();
+				  
+				  short toBeAdd = (short) ((short) (readCount/aveRead) + currentReplication);
+				  
+				  inf.setFileReplication(toBeAdd);
+				  
+				  //add blocks
+				  
+				  
+				  
+			  }
+			  else if (readCount<aveRead)
+			  {
+				  
+				  inf.setFileReplication((short) 1);
+			  }
+			  //check the replication of the inf
+			  blockManager.checkReplication(inf);
+			  //after the period the readcount should be clear
+			  inode.asFile().setReadCount(0);
+		  }
+		  
+	  }
+	  
+	  writeUnlock();
+	  
+	  
+	  
+	  
+	  
+	  
+  }
+  
+
 }
+
+
 
